@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>五子棋遊戲 (Gomoku)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Tone.js 函式庫用於生成音效 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        
+        /* 定義顏色變數 */
+        :root {
+            --board-color: #f0e6c5; /* 棋盤背景色 (米黃色) */
+            --line-color: #000000;
+            --black-stone: #000000;
+            --white-stone: #ffffff;
+            --win-color: #ef4444; /* 紅色高亮 */
+            --ai-color: #3b82f6; /* 藍色用於 AI 相關 UI */
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1f2937; /* 深灰背景 */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 10px;
+        }
+
+        .gomoku-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #374151;
+            padding: 20px;
+            border-radius: 1rem;
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.5);
+            max-width: 95vw;
+            width: 700px;
+        }
+
+        .gomoku-board {
+            --board-size: 15; /* 棋盤格數 */
+            display: grid;
+            grid-template-columns: repeat(var(--board-size), 1fr);
+            grid-template-rows: repeat(var(--board-size), 1fr);
+            
+            /* 調整棋盤大小以適應容器 */
+            width: min(600px, 90vw);
+            aspect-ratio: 1 / 1;
+            
+            background-color: var(--board-color);
+            border: 3px solid var(--line-color);
+        }
+
+        .square {
+            position: relative;
+            cursor: pointer;
+            box-sizing: border-box;
+        }
+
+        /* 繪製棋盤線條，只在右方和下方繪製 */
+        .square::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border-right: 1px solid var(--line-color);
+            border-bottom: 1px solid var(--line-color);
+            z-index: 0;
+        }
+
+        /* 移除最右和最下邊界線 */
+        .square:nth-child(15n)::after { border-right: none; }
+        .square:nth-child(n+211)::after { border-bottom: none; } /* 15 * 14 + 1 = 211 */
+
+        /* 棋子標記 */
+        .stone {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%; /* 棋子大小略小於格子 */
+            height: 80%;
+            border-radius: 50%;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+            pointer-events: none; /* 讓點擊穿透到 square */
+            transition: transform 0.1s ease-out;
+        }
+
+        .stone.black {
+            background-color: var(--black-stone);
+        }
+
+        .stone.white {
+            background-color: var(--white-stone);
+            border: 1px solid #333;
+        }
+        
+        /* 勝利高亮標記 */
+        .win-line .stone {
+            box-shadow: 0 0 5px 3px var(--win-color);
+            transform: translate(-50%, -50%) scale(1.1);
+        }
+
+        /* 聽牌點標記 (Winning Move Highlight) */
+        .square.winning-move::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 6px;
+            height: 6px;
+            background-color: var(--win-color); /* 紅色 */
+            border-radius: 50%;
+            z-index: 5; /* 在線條之上，在棋子之下 */
+            box-shadow: 0 0 4px var(--win-color);
+        }
+        
+        /* ------------------ UI 元素樣式 ------------------ */
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        /* 模式切換按鈕樣式 */
+        .mode-button {
+            padding: 8px 15px;
+            border-radius: 0.5rem;
+            font-weight: bold;
+            color: white;
+            transition: background-color 0.2s, transform 0.1s;
+        }
+
+        .mode-button.active {
+            background-color: var(--ai-color);
+            box-shadow: 0 4px #1e40af;
+        }
+
+        .mode-button:not(.active) {
+            background-color: #4b5563;
+            box-shadow: 0 4px #374151;
+        }
+
+        .mode-button:hover:not(.active) {
+            background-color: #6b7280;
+        }
+
+        .mode-button:active {
+            transform: translateY(2px);
+            box-shadow: 0 2px #374151;
+        }
+
+        /* 狀態訊息樣式 */
+        #status-message {
+            margin-top: 15px;
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #d1d5db;
+            min-height: 40px;
+            text-align: center;
+        }
+
+        /* 重置按鈕樣式 */
+        #reset-button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            background-color: #10b981;
+            color: white;
+            border: none;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: bold;
+            transition: background-color 0.2s, transform 0.1s;
+            box-shadow: 0 4px #059669;
+        }
+
+        #reset-button:hover {
+            background-color: #059669;
+        }
+
+        #reset-button:active {
+            transform: translateY(2px);
+            box-shadow: 0 2px #059669;
+        }
+
+    </style>
+</head>
+<body>
+    <div class="gomoku-container">
+        <!-- 模式切換控制項 -->
+        <div class="controls">
+            <button id="mode-pvc" class="mode-button">與電腦對戰 (PvC)</button>
+            <button id="mode-pvp" class="mode-button active">與人類對戰 (PvP)</button>
+        </div>
+
+        <div id="status-message"></div>
+        <div class="gomoku-board" id="gomoku-board">
+            <!-- 棋盤方格將由 JavaScript 生成 -->
+        </div>
+        <button id="reset-button">重新開始遊戲</button>
+    </div>
+
+    <script>
+        // 全局變數
+        const BOARD_SIZE = 15;
+        let board; // 15x15 棋盤陣列
+        let turn;  // 'b' for Black, 'w' for White
+        let gameOver = false;
+        let placedStones = 0;
+        let gameMode = 'PvP'; // 'PvP' (Human vs Human) or 'PvC' (Human vs Computer)
+        const AI_PLAYER = 'w'; // AI 永遠作為白方
+        
+        let clickSynth; // Tone.js 合成器 for stone placement (落子音效)
+        let threatSynth; // Tone.js 合成器 for winning threat (聽牌音效)
+
+        // ----------------------- 音訊初始化 -----------------------
+
+        /**
+         * 初始化聲音合成器 (Tone.js)
+         */
+        function initAudio() {
+            if (typeof Tone !== 'undefined') {
+                // 1. 落子音效 (低沉的 "咚" 聲)
+                clickSynth = new Tone.Synth({
+                    oscillator: { type: "sine" },
+                    envelope: {
+                        attack: 0.001,
+                        decay: 0.1,
+                        sustain: 0,
+                        release: 0.1
+                    }
+                }).toDestination();
+
+                // 2. 聽牌警示音效 (高頻的 "嗶" 聲)
+                threatSynth = new Tone.Synth({
+                    oscillator: { type: "triangle" }, // 使用三角波，聲音更尖銳
+                    envelope: {
+                        attack: 0.01,
+                        decay: 0.2,
+                        sustain: 0,
+                        release: 0.2
+                    }
+                }).toDestination();
+            }
+        }
+
+        /**
+         * 播放落子音效
+         */
+        function playStoneSound() {
+            if (clickSynth) {
+                if (Tone.context.state !== 'running') {
+                    Tone.start(); 
+                }
+                const note = turn === 'b' ? "C4" : "D4"; 
+                clickSynth.triggerAttackRelease(note, "8n");
+            }
+        }
+        
+        /**
+         * 播放聽牌音效
+         */
+        function playThreatSound() {
+            if (threatSynth) {
+                if (Tone.context.state !== 'running') {
+                    Tone.start(); 
+                }
+                // 使用高音調 (G5) 且非常短暫，作為警示
+                threatSynth.triggerAttackRelease("G5", "16n");
+            }
+        }
+
+
+        // ----------------------- 遊戲初始化與渲染 -----------------------
+
+        /**
+         * 初始化遊戲狀態和棋盤陣列
+         */
+        function initGame() {
+            board = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(''));
+            turn = 'b'; // 黑方先行
+            gameOver = false;
+            placedStones = 0;
+            
+            initAudio();
+            
+            renderBoard();
+            updateStatus();
+            
+            // 檢查是否需要 AI 立即行動 (僅在 PvC 模式且 AI 是第一個玩家時，雖然我們設定 AI 是白方，所以通常不會)
+            checkAITurn(); 
+            
+            // 首次加載時高亮聽牌點 (雖然棋盤是空的，但保持邏輯完整性)
+            highlightWinningMoves(findWinningMoves());
+        }
+
+        /**
+         * 渲染棋盤到 DOM
+         */
+        function renderBoard() {
+            const boardEl = document.getElementById('gomoku-board');
+            boardEl.innerHTML = '';
+            
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    const squareEl = document.createElement('div');
+                    squareEl.classList.add('square');
+                    squareEl.dataset.row = r;
+                    squareEl.dataset.col = c;
+                    squareEl.addEventListener('click', handleClick);
+
+                    const stoneType = board[r][c];
+                    if (stoneType !== '') {
+                        const stoneEl = document.createElement('div');
+                        stoneEl.classList.add('stone', stoneType === 'b' ? 'black' : 'white');
+                        squareEl.appendChild(stoneEl);
+                    }
+                    
+                    boardEl.appendChild(squareEl);
+                }
+            }
+        }
+
+        /**
+         * 更新狀態訊息
+         */
+        function updateStatus() {
+            const statusMessageEl = document.getElementById('status-message');
+            const modeText = gameMode === 'PvC' ? ' (電腦對戰)' : ' (人類對戰)';
+            
+            if (gameOver) {
+                statusMessageEl.style.color = 'var(--win-color)';
+                if (placedStones === BOARD_SIZE * BOARD_SIZE) {
+                    statusMessageEl.textContent = "和棋！棋盤已滿。";
+                } else {
+                    const winner = turn === 'b' ? '黑方 (Black)' : (gameMode === 'PvC' ? '電腦 (White)' : '白方 (White)');
+                    statusMessageEl.textContent = `恭喜！${winner} 獲勝！`;
+                }
+            } else {
+                statusMessageEl.style.color = '#d1d5db';
+                const currentTurn = turn === 'b' ? '黑方 (Black)' : (gameMode === 'PvC' ? '電腦 (White)' : '白方 (White)');
+                statusMessageEl.textContent = `現在是 ${currentTurn} 回合${modeText}`;
+            }
+        }
+
+        // ----------------------- AI 邏輯 -----------------------
+
+        // 定義 AI 評分等級
+        const SCORES = {
+            FIVE: 1000000,   // 必勝
+            LIVE_FOUR: 50000, // 活四 (下一手必勝)
+            BLOCKED_FOUR: 400, // 眠四/衝四 (兩邊只開一邊)
+            LIVE_THREE: 3000, // 活三 (下一步可以變活四或眠四，有潛力)
+            BLOCKED_THREE: 200, // 眠三
+            LIVE_TWO: 50,
+            BLOCKED_TWO: 5
+        };
+        
+        // 四個方向
+        const DIRECTIONS = [ [0, 1], [1, 0], [1, 1], [1, -1] ];
+
+        /**
+         * 檢查某個位置 (r, c) 在特定方向 (dr, dc) 上形成的連子情況並計算分數
+         * @param {number} r - 行
+         * @param {number} c - 列
+         * @param {string} player - 評分的玩家 ('b' 或 'w')
+         * @param {number} dr - 行方向向量
+         * @param {number} dc - 列方向向量
+         * @returns {number} 該方向上的最高潛在分數
+         */
+        function checkDirectionScore(r, c, player, dr, dc) {
+            let score = 0;
+            let currentStones = 1;
+            let openEnds = 0;
+            
+            const opponent = player === 'b' ? 'w' : 'b';
+
+            // 檢查正向
+            let nr = r + dr;
+            let nc = c + dc;
+            while (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE) {
+                if (board[nr][nc] === player) {
+                    currentStones++;
+                } else if (board[nr][nc] === '') {
+                    openEnds++;
+                    break;
+                } else { // 遇到對手的棋子，被阻擋
+                    break;
+                }
+                nr += dr;
+                nc += dc;
+            }
+
+            // 檢查反向
+            nr = r - dr;
+            nc = c - dc;
+            while (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE) {
+                if (board[nr][nc] === player) {
+                    currentStones++;
+                } else if (board[nr][nc] === '') {
+                    openEnds++;
+                    break;
+                } else { // 遇到對手的棋子，被阻擋
+                    break;
+                }
+                nr -= dr;
+                nc -= dc;
+            }
+
+            // 根據連子數和開放端點數來評分
+            if (currentStones >= 5) return SCORES.FIVE;
+
+            if (currentStones === 4) {
+                if (openEnds === 2) score = SCORES.LIVE_FOUR; // 活四
+                else if (openEnds === 1) score = SCORES.BLOCKED_FOUR; // 眠四/衝四
+            } else if (currentStones === 3) {
+                if (openEnds === 2) score = SCORES.LIVE_THREE; // 活三
+                else if (openEnds === 1) score = SCORES.BLOCKED_THREE; // 眠三
+            } else if (currentStones === 2) {
+                if (openEnds === 2) score = SCORES.LIVE_TWO; // 活二
+                else if (openEnds === 1) score = SCORES.BLOCKED_TWO; // 眠二
+            }
+            
+            return score;
+        }
+
+        /**
+         * 評估一個空點 (r, c) 對當前玩家和對手的總威脅分數。
+         * @param {number} r - 行
+         * @param {number} c - 列
+         * @param {string} player - 當前評估的玩家 ('b' 或 'w')
+         * @returns {number} 該位置的總評分
+         */
+        function scoreMove(r, c, player) {
+            // 如果該位置已有棋子，返回極低分
+            if (board[r][c] !== '') return -1; 
+
+            const opponent = player === 'b' ? 'w' : 'b';
+            let myScore = 0;
+            let opponentScore = 0;
+
+            // 1. 計算自己落子後能產生的威脅 (攻擊分數)
+            board[r][c] = player;
+            for (const [dr, dc] of DIRECTIONS) {
+                myScore = Math.max(myScore, checkDirectionScore(r, c, player, dr, dc));
+            }
+            board[r][c] = ''; // 撤銷虛擬落子
+
+            // 2. 計算對手如果落子此處能產生的威脅 (防守分數)
+            board[r][c] = opponent;
+            for (const [dr, dc] of DIRECTIONS) {
+                opponentScore = Math.max(opponentScore, checkDirectionScore(r, c, opponent, dr, dc));
+            }
+            board[r][c] = ''; // 撤銷虛擬落子
+
+            // 總評分：優先必勝，其次防守必敗，然後是攻擊活四/活三等。
+            // 由於 AI 永遠是 'w'，我們總是評估 'w' 的行動。
+            // AI 優先考慮：
+            // A. 自己能獲勝 (myScore >= FIVE)
+            // B. 阻擋對手獲勝 (opponentScore >= FIVE) - 因為對手是黑方，AI是白方，如果對手有五子連線威脅，AI必須先擋。
+            // C. 建立活四 (myScore >= LIVE_FOUR)
+            // D. 阻擋對手活四 (opponentScore >= LIVE_FOUR)
+            
+            // 策略：將攻擊分數和防守分數相加，但給予高分項更高的優先級。
+            
+            // 最高的威脅分數（無論是我的還是對手的）
+            const maxThreat = Math.max(myScore, opponentScore);
+
+            if (maxThreat >= SCORES.FIVE) {
+                // 必勝或必擋：直接使用極高分
+                return maxThreat * 2; 
+            }
+            
+            // 活四或阻擋活四：給予第二高分，且自己的活四優先於對手的活四
+            if (myScore >= SCORES.LIVE_FOUR) {
+                return myScore + SCORES.LIVE_FOUR * 0.5; // 攻擊優先
+            }
+            if (opponentScore >= SCORES.LIVE_FOUR) {
+                return opponentScore + SCORES.BLOCKED_FOUR; // 防守次之
+            }
+            
+            // 組合其他威脅
+            return myScore * 1.5 + opponentScore;
+        }
+
+        /**
+         * 執行 AI 的回合，找出最佳棋步並落子
+         */
+        function aiMove() {
+            if (gameOver || turn !== AI_PLAYER) return;
+            
+            let bestScore = -Infinity;
+            let bestMove = null;
+
+            // 搜尋所有空點
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    if (board[r][c] === '') {
+                        const currentScore = scoreMove(r, c, AI_PLAYER);
+
+                        // 測試中：如果棋盤是空的 (第一步)，隨機在中心附近下
+                        if (placedStones === 0) {
+                            if (r === 7 && c === 7) bestMove = [r, c]; // 強制在天元下子
+                            continue;
+                        }
+
+                        if (currentScore > bestScore) {
+                            bestScore = currentScore;
+                            bestMove = [r, c];
+                        } else if (currentScore === bestScore && bestMove) {
+                             // 如果分數相同，隨機選擇一個，避免 AI 總是在同一位置下棋
+                            if (Math.random() < 0.5) {
+                                bestMove = [r, c];
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 如果沒有找到任何有威脅的棋步 (例如棋盤很空)，則選擇一個靠近中心的空位
+            if (!bestMove) {
+                let centerR = Math.floor(BOARD_SIZE / 2);
+                let centerC = Math.floor(BOARD_SIZE / 2);
+
+                // 搜尋中心周圍的空位
+                for (let dist = 0; dist < BOARD_SIZE; dist++) {
+                    for (let r = Math.max(0, centerR - dist); r <= Math.min(BOARD_SIZE - 1, centerR + dist); r++) {
+                        for (let c = Math.max(0, centerC - dist); c <= Math.min(BOARD_SIZE - 1, centerC + dist); c++) {
+                            if (board[r][c] === '') {
+                                bestMove = [r, c];
+                                // 如果在中心附近找到空點且周圍已有棋子，則使用
+                                if (placedStones > 0) {
+                                    return; 
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // 執行最佳棋步
+            if (bestMove) {
+                // 使用 setTimeout 模擬 AI 思考時間，讓遊戲看起來更自然
+                document.body.style.cursor = 'wait'; // 顯示等待游標
+                setTimeout(() => {
+                    const [r, c] = bestMove;
+                    executeMove(r, c);
+                    document.body.style.cursor = 'default'; // 恢復游標
+                }, 500); // 延遲 500 毫秒
+            }
+        }
+
+        // ----------------------- 遊戲核心邏輯 -----------------------
+
+        /**
+         * 檢查從 (r, c) 座標開始是否有五子連線，返回獲勝線的座標列表
+         * @param {number} r 檢查的行
+         * @param {number} c 檢查的列
+         * @param {Array<Array<string>>} currentBoard 當前的棋盤狀態
+         * @returns {Array<Array<number>> | null} 獲勝線座標列表，否則為 null
+         */
+        function getWinningLine(r, c, currentBoard) {
+            const player = currentBoard[r][c];
+            if (!player) return null;
+
+            for (const [dr, dc] of DIRECTIONS) {
+                let count = 1;
+                let winLine = [[r, c]];
+
+                // 檢查正向
+                for (let i = 1; i <= 4; i++) {
+                    const nr = r + i * dr;
+                    const nc = c + i * dc;
+                    if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && currentBoard[nr][nc] === player) {
+                        count++;
+                        winLine.push([nr, nc]);
+                    } else { break; }
+                }
+
+                // 檢查反向
+                for (let i = 1; i <= 4; i++) {
+                    const nr = r - i * dr;
+                    const nc = c - i * dc;
+                    if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && currentBoard[nr][nc] === player) {
+                        count++;
+                        winLine.push([nr, nc]);
+                    } else { break; }
+                }
+
+                if (count >= 5) {
+                    return winLine;
+                }
+            }
+            return null;
+        }
+
+
+        /**
+         * 在落子後檢查是否獲勝，並高亮顯示
+         * @param {number} r 新落子的行
+         * @param {number} c 新落子的列
+         * @returns {boolean} 如果獲勝則為 true
+         */
+        function checkWin(r, c) {
+            const winLine = getWinningLine(r, c, board);
+            if (winLine) {
+                highlightWin(winLine);
+                return true;
+            }
+            return false;
+        }
+
+        /**
+         * 找出所有能立即獲勝的落子點 (聽牌)
+         * @returns {Array<Array<number>>} 獲勝點座標列表 [[r1, c1], [r2, c2], ...]
+         */
+        function findWinningMoves() {
+            const moves = [];
+            if (gameOver) return moves;
+
+            const currentPlayer = turn;
+
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    if (board[r][c] === '') {
+                        // 暫時落子
+                        board[r][c] = currentPlayer;
+
+                        // 檢查此步是否能獲勝
+                        if (getWinningLine(r, c, board)) {
+                            moves.push([r, c]);
+                        }
+
+                        // 撤銷落子
+                        board[r][c] = '';
+                    }
+                }
+            }
+            return moves;
+        }
+
+        /**
+         * 高亮顯示所有聽牌點
+         * @param {Array<Array<number>>} moves 聽牌點座標列表
+         */
+        function highlightWinningMoves(moves) {
+            // 1. 清除所有舊的聽牌標記和勝利標記
+            document.querySelectorAll('.square').forEach(el => {
+                el.classList.remove('winning-move');
+                el.classList.remove('win-line');
+            });
+
+            // 2. 標記新的聽牌點
+            if (!gameOver) {
+                if (moves.length > 0) {
+                    playThreatSound(); // **如果找到聽牌點，則播放音效**
+                }
+                moves.forEach(([r, c]) => {
+                    const squareEl = document.querySelector(`.square[data-row="${r}"][data-col="${c}"]`);
+                    if (squareEl) {
+                        squareEl.classList.add('winning-move');
+                    }
+                });
+            }
+        }
+
+
+        // ----------------------- 遊戲流程控制 -----------------------
+
+        /**
+         * 執行落子動作並更新遊戲狀態
+         * @param {number} r - 行
+         * @param {number} c - 列
+         */
+        function executeMove(r, c) {
+            const squareEl = document.querySelector(`.square[data-row="${r}"][data-col="${c}"]`);
+
+            // 1. 落子
+            board[r][c] = turn;
+            placedStones++;
+            
+            // 立即渲染新棋子
+            const stoneEl = document.createElement('div');
+            stoneEl.classList.add('stone', turn === 'b' ? 'black' : 'white');
+            squareEl.appendChild(stoneEl);
+            
+            // 清除點擊前的聽牌標記 (此點已落子)
+            squareEl.classList.remove('winning-move');
+
+            // 播放落子音效
+            playStoneSound(); 
+            
+            // 2. 檢查勝利條件
+            if (checkWin(r, c)) {
+                gameOver = true;
+                updateStatus();
+            } else if (placedStones === BOARD_SIZE * BOARD_SIZE) {
+                // 檢查平局
+                gameOver = true;
+                updateStatus();
+            } else {
+                // 3. 切換回合
+                turn = (turn === 'b' ? 'w' : 'b');
+                updateStatus();
+                
+                // 4. 找出並高亮下一個回合的聽牌點
+                highlightWinningMoves(findWinningMoves());
+                
+                // 5. 如果是 PvC 模式且輪到 AI，則呼叫 AI 
+                checkAITurn();
+            }
+        }
+
+        /**
+         * 處理棋盤點擊事件 (僅限人類玩家)
+         * @param {Event} e 點擊事件
+         */
+        function handleClick(e) {
+            if (gameOver) return;
+
+            const r = parseInt(e.currentTarget.dataset.row);
+            const c = parseInt(e.currentTarget.dataset.col);
+            
+            // 在 PvC 模式下，如果輪到 AI (白方)，則人類不能點擊
+            if (gameMode === 'PvC' && turn === AI_PLAYER) {
+                // 提示電腦正在思考
+                updateStatus(); 
+                return;
+            }
+
+            // 檢查方格是否為空
+            if (board[r][c] === '') {
+                executeMove(r, c);
+            }
+        }
+        
+        /**
+         * 檢查是否輪到 AI 行動，如果是則呼叫 aiMove
+         */
+        function checkAITurn() {
+            if (!gameOver && gameMode === 'PvC' && turn === AI_PLAYER) {
+                // 在 AI 行動前先更新狀態訊息
+                const statusMessageEl = document.getElementById('status-message');
+                statusMessageEl.textContent = "電腦 (AI) 正在思考...";
+                statusMessageEl.style.color = 'var(--ai-color)';
+
+                aiMove();
+            }
+        }
+
+        /**
+         * 高亮顯示獲勝的五子連線
+         * @param {Array<Array<number>>} winLine 獲勝線的座標列表
+         */
+        function highlightWin(winLine) {
+            winLine.forEach(([r, c]) => {
+                const squareEl = document.querySelector(`.square[data-row="${r}"][data-col="${c}"]`);
+                if (squareEl) {
+                    squareEl.classList.add('win-line');
+                }
+            });
+            // 遊戲結束時，清除所有聽牌標記
+            document.querySelectorAll('.square').forEach(el => {
+                el.classList.remove('winning-move');
+            });
+        }
+        
+        /**
+         * 切換遊戲模式
+         * @param {string} mode - 'PvP' 或 'PvC'
+         */
+        function setGameMode(mode) {
+            if (gameMode !== mode) {
+                gameMode = mode;
+                
+                // 更新按鈕樣式
+                document.getElementById('mode-pvc').classList.toggle('active', mode === 'PvC');
+                document.getElementById('mode-pvp').classList.toggle('active', mode === 'PvP');
+
+                // 重新開始遊戲以應用新模式
+                initGame();
+            }
+        }
+        
+        // ----------------------- 遊戲控制 -----------------------
+
+        // 綁定重置按鈕
+        document.getElementById('reset-button').addEventListener('click', initGame);
+        
+        // 綁定模式切換按鈕
+        document.getElementById('mode-pvc').addEventListener('click', () => setGameMode('PvC'));
+        document.getElementById('mode-pvp').addEventListener('click', () => setGameMode('PvP'));
+
+
+        // 首次初始化
+        window.onload = initGame;
+    </script>
+</body>
+</html>
